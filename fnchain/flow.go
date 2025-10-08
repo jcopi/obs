@@ -1,6 +1,6 @@
 package fnchain
 
-type Event[T any, M EventMeta[M, T]] interface {
+type Event[T any, M EventMeta[M, *T]] interface {
 	With() M
 
 	// Create an event with the current as the parent

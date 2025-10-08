@@ -16,7 +16,7 @@ const maxEventBufferSize = 4 * 1024 * 1024 // 4 MiB
 // sync.Pool requires that each member has roughly the same memory cost in-order to operate efficiently
 // if there is any single member that is significantly larger than the mean it should not be added to the pool and
 // allowed to be GC'd immediately.
-const minEventBufferSizer = 64 // 64 B.
+const minEventBufferSize = 64 // 64 B.
 // There is little value in adding a buffer smaller than this to the pool.
 // It's likely to require allocations to increase the size so it's better to just allocate a larger buffer up front
 const defaultEventBufferSize = 128 // 128 B
@@ -34,12 +34,14 @@ type Ctx[E encoder] struct {
 
 type CtxMeta[E encoder] Ctx[E]
 
-var _ Event[*Ctx[jsonEncoder], *CtxMeta[jsonEncoder]] = &Ctx[jsonEncoder]{}
+var _ Event[Ctx[jsonEncoder], *CtxMeta[jsonEncoder]] = &Ctx[jsonEncoder]{}
 
 // Event implements Event.
-func (c *Ctx[T]) Event(lvl Level, typ EvtType) *Ctx[T] {
+func (c *Ctx[T]) Event(lvl Level, typ EvtType) Ctx[T] {
 	id, buf := c.engine.initEvent(len(c.buf))
-	return &Ctx[T]{
+
+	// There is a need to
+	return Ctx[T]{
 		eventID:     id,
 		eventParent: c.eventID,
 		lvl:         lvl,
@@ -51,7 +53,13 @@ func (c *Ctx[T]) Event(lvl Level, typ EvtType) *Ctx[T] {
 
 // End implements Event.
 func (c *Ctx[T]) End() {
-	c = c.With().Uint("type", uint(c.typ)).Str("lvl", LevelString(c.lvl)).Evt()
+	var enc T
+
+	c.buf = enc.appendID(c.buf, "@id", c.eventID)
+	c.buf = enc.appendID(c.buf, "@pid", c.eventParent)
+	c.buf = enc.appendUint(c.buf, "@type", uint(c.typ))
+	c.buf = enc.appendStr(c.buf, "level", LevelString(c.lvl))
+
 	c.engine.QueueEvent(c.buf)
 	c.buf = nil
 }
@@ -201,6 +209,18 @@ func (e *Engine[T]) initEvent(knownBufferSize int) (uint64, []byte) {
 	return e.idsrc.Uint64(), b[:0]
 }
 
+// TODO: QueueEvent and ProcessEvents needs some testing. The assumption was that writing to a
+// buffered channel that actually did the syscall writes would produce *consistent* (and minimal)
+// latency when writing events `End()`. This assumption needs to be tested.
+// Some benchmarks exist, but they're not really representative, when there are event buffers being
+// written continuously (particularly small events) it's easy to saturate the throughput of the `write`
+// call and so the `End()` calls end up spending a lot of time waiting on channel locks. When saturating the
+// underlying writer directly writing should always be fastest, but shouldn't be indicative of real-world usage.
+//
+// Another issue is that benchmarks can easily show the average/amortized cost, but we also need to ensure that
+// we don't introduce large latencies to a small number of events. Once potential impact of direct buffered writes
+// is that most End()s are just fast copies, but a small number of End()s turn into potentially expensive large write syscalls
+// we need a way to test the average and the p99 cases.
 func (e *Engine[T]) QueueEvent(evt []byte) {
 	e.queue <- evt
 }
@@ -227,7 +247,7 @@ func (e *Engine[T]) ProcessEvents(w io.Writer) {
 	// Writing in page size chunks seems to dramatically increases the write speed
 	// returns diminish fairly quickly with increasing multiples of the page size
 	// In minimal initial testing there doesn't seem to be much discernible difference after 2x
-	bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
+	bw := bwWrap{bufio.NewWriterSize(w, 8*os.Getpagesize())}
 	ticker := time.NewTicker(1 * time.Minute)
 
 	defer bw.Flush()
@@ -267,7 +287,7 @@ func (e *Engine[T]) getBuffer(len int) []byte {
 }
 
 func (e *Engine[T]) putBuffer(b []byte) {
-	if cap(b) < 4 || cap(b) > e.maxBuffer {
+	if cap(b) < minEventBufferSize || cap(b) > e.maxBuffer {
 		return
 	}
 
@@ -280,7 +300,7 @@ func NewEngine[T encoder]() *Engine[T] {
 	crand.Read(chachaSeed[:])
 	return &Engine[T]{
 		evtPool:   sync.Pool{},
-		queue:     make(chan []byte, 64),
+		queue:     make(chan []byte, eventQueueSize),
 		idsrc:     rand.New(rand.NewChaCha8(chachaSeed)),
 		maxBuffer: maxEventBufferSize, // 4 MiB
 	}

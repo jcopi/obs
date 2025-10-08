@@ -1,9 +1,11 @@
 package fnchain
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
-	"io"
+	"math"
+	"math/rand/v2"
 	"os"
 	"testing"
 	"time"
@@ -151,6 +153,61 @@ func BenchmarkEncodeStringInternal(b *testing.B) {
 	}
 }
 
+func BenchmarkEncodeID(b *testing.B) {
+	id0 := uint64(0)
+	idRand := rand.Uint64()
+	idMax := uint64(math.MaxUint64)
+
+	b.Run("b64_0", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendID(bs[:0], "id", id0)
+		}
+	})
+	b.Run("b64_rand", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendID(bs[:0], "id", idRand)
+		}
+	})
+	b.Run("b64_max", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendID(bs[:0], "id", idMax)
+		}
+	})
+	b.Run("b10_0", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendUint64(bs[:0], "id", id0)
+		}
+	})
+	b.Run("b10_rand", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendUint64(bs[:0], "id", idRand)
+		}
+	})
+	b.Run("b10_max", func(b *testing.B) {
+		buf := [24]byte{}
+		bs := buf[:0]
+
+		for b.Loop() {
+			bs = jsonEncoder{}.appendUint64(bs[:0], "id", idMax)
+		}
+	})
+}
+
 func BenchmarkMarshalling(b *testing.B) {
 	dir := b.TempDir()
 
@@ -183,8 +240,10 @@ func BenchmarkMarshalling(b *testing.B) {
 		if err != nil {
 			b.Error(err)
 		}
+		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
+		defer w.Flush()
 		defer f.Close()
-		logger := zerolog.New(f)
+		logger := zerolog.New(bwWrap{w})
 
 		err = errors.New("error")
 		tm := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -203,7 +262,7 @@ func BenchmarkMarshalling(b *testing.B) {
 		defer f.Close()
 
 		engine := NewEngine[jsonEncoder]()
-		go engine.ProcessEvents(io.Discard)
+		go engine.ProcessEvents(f)
 		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
@@ -220,7 +279,15 @@ func BenchmarkMarshalling(b *testing.B) {
 		}
 	})
 	b.Run("zerolog_strings", func(b *testing.B) {
-		logger := zerolog.New(io.Discard)
+		f, err := os.CreateTemp(dir, "local_strings.log")
+		if err != nil {
+			b.Error(err)
+		}
+		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
+		defer w.Flush()
+		defer f.Close()
+
+		logger := zerolog.New(bwWrap{w})
 
 		for b.Loop() {
 			logger.Info().
@@ -231,8 +298,14 @@ func BenchmarkMarshalling(b *testing.B) {
 		}
 	})
 	b.Run("local_real_log", func(b *testing.B) {
+		f, err := os.CreateTemp(dir, "local_strings.log")
+		if err != nil {
+			b.Error(err)
+		}
+		defer f.Close()
+
 		engine := NewEngine[jsonEncoder]()
-		go engine.ProcessEvents(io.Discard)
+		go engine.ProcessEvents(f)
 		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
@@ -262,7 +335,15 @@ func BenchmarkMarshalling(b *testing.B) {
 		}
 	})
 	b.Run("zerolog_real_log", func(b *testing.B) {
-		logger := zerolog.New(io.Discard)
+		f, err := os.CreateTemp(dir, "local_strings.log")
+		if err != nil {
+			b.Error(err)
+		}
+		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
+		defer w.Flush()
+		defer f.Close()
+
+		logger := zerolog.New(bwWrap{w})
 
 		for b.Loop() {
 			logger.Info().

@@ -33,6 +33,8 @@ type encoder interface {
 
 type jsonEncoder struct{}
 
+// Latency to encode
+
 // appendB64 implements encoder.
 func (j jsonEncoder) appendB64(dst []byte, key string, b []byte) []byte {
 	dst = j.appendKeyOfPair(dst, key)
@@ -43,10 +45,14 @@ func (j jsonEncoder) appendB64(dst []byte, key string, b []byte) []byte {
 
 // appendID implements encoder.
 func (j jsonEncoder) appendID(dst []byte, key string, id uint64) []byte {
-
+	// will be common to all events, it makes sense to define as efficient of
+	// an encoding as possible. Currently the encoding is not maximally efficient
 	b := [8]byte{}
-	return j.appendB64(dst, key, binary.LittleEndian.AppendUint64(b[:0], id))
-
+	binary.LittleEndian.AppendUint64(b[:0], id)
+	dst = j.appendKeyOfPair(dst, key)
+	dst = append(dst, '"')
+	dst = base64.RawURLEncoding.AppendEncode(dst, b[:])
+	return append(dst, '"', ',')
 }
 
 var escapeTableIdx = [256]int8{
@@ -101,7 +107,7 @@ func (j jsonEncoder) appendEscapedString(dst []byte, s string) []byte {
 	// TODO: real implementation, this is a PoC hack
 	dst = append(dst, '"')
 
-	x := 8 * (len(s) / 8)
+	x := (len(s) / 8) * 8
 	for i := 0; i < x; i += 8 {
 		if needsJSONEscape(*(*uint64)(unsafe.Pointer(unsafe.StringData(s[i:])))) == 0 {
 			dst = append(dst, s[i:i+8]...)
