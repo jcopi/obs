@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"math/rand/v2"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/rs/zerolog"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEscape(t *testing.T) {
@@ -30,9 +30,13 @@ func TestEscape(t *testing.T) {
 			dst = (jsonEncoder{}).appendEscapedString(dst, tc.input)
 			var out string
 			err := json.Unmarshal(dst, &out)
-			require.NoError(t, err)
+			if err != nil {
+				t.Error(err)
+			}
 
-			require.Equal(t, tc.input, out)
+			if out != tc.input {
+				t.Errorf("expected %q, got %q", tc.input, out)
+			}
 		})
 	}
 }
@@ -208,22 +212,36 @@ func BenchmarkEncodeID(b *testing.B) {
 	})
 }
 
-func BenchmarkMarshalling(b *testing.B) {
-	dir := b.TempDir()
+func benchmarkMarshalFramework(b *testing.B, name string, fn func(b *testing.B, w io.Writer)) {
+	tmp := b.TempDir()
 
-	b.Run("local_all_types", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "local_all_types.log")
+	b.Run(name, func(b *testing.B) {
+		f, err := os.CreateTemp(tmp, name+"_*.log")
 		if err != nil {
 			b.Error(err)
 		}
 		defer f.Close()
 
-		engine := NewEngine[jsonEncoder]()
-		go engine.ProcessEvents(f)
-		defer engine.Close()
+		fn(b, f)
 
-		err = errors.New("error")
-		tm := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		info, err := f.Stat()
+		if err != nil {
+			b.Error(err)
+		}
+
+		b.ReportMetric(float64(info.Size())/float64(b.N), "wB/op")
+		b.ReportMetric((float64(b.Elapsed().Nanoseconds())/float64(b.N))/(float64(info.Size())/float64(b.N)), "ns/wB")
+	})
+}
+
+func BenchmarkMarshalling(b *testing.B) {
+	err := errors.New("error")
+	tm := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	benchmarkMarshalFramework(b, "all_types", func(b *testing.B, w io.Writer) {
+		engine := NewEngine[jsonEncoder]()
+		go engine.ProcessEvents(w)
+		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
 
@@ -235,40 +253,28 @@ func BenchmarkMarshalling(b *testing.B) {
 				Msg("message").Err(err).Evt().End()
 		}
 	})
-	b.Run("zerolog_all_types", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "zerolog_all_types.log")
-		if err != nil {
-			b.Error(err)
-		}
-		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
-		defer w.Flush()
-		defer f.Close()
-		logger := zerolog.New(bwWrap{w})
 
-		err = errors.New("error")
-		tm := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	benchmarkMarshalFramework(b, "zl_all_types", func(b *testing.B, w io.Writer) {
+		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
+		defer bw.Flush()
 
+		logger := zerolog.New(bw)
 		for b.Loop() {
 			logger.Info().Bool("bool", true).Dur("dur", time.Minute).
-				Int("int", -42).Uint("uint", 42).Float64("float", 0.1).Uint("type", 0).
+				Int("int", -42).Uint("uint", 42).Float64("float", 0.1).
+				Uint("@type", 0).Uint64("@id", 0).Uint64("@pid", 0). // Equivalent of the fields that are auto added by the event End
+				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Str("str", "hello world").Time("time", tm).Err(err).Msg("message")
 		}
 	})
-	b.Run("local_strings", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "local_strings.log")
-		if err != nil {
-			b.Error(err)
-		}
-		defer f.Close()
 
+	benchmarkMarshalFramework(b, "strings", func(b *testing.B, w io.Writer) {
 		engine := NewEngine[jsonEncoder]()
-		go engine.ProcessEvents(f)
+		go engine.ProcessEvents(w)
 		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
-
 		for b.Loop() {
-
 			ctx := root.Event(NoLevel, GenericEvent)
 			ctx.With().
 				Str("str", "hello world").
@@ -278,38 +284,28 @@ func BenchmarkMarshalling(b *testing.B) {
 				End()
 		}
 	})
-	b.Run("zerolog_strings", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "local_strings.log")
-		if err != nil {
-			b.Error(err)
-		}
-		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
-		defer w.Flush()
-		defer f.Close()
 
-		logger := zerolog.New(bwWrap{w})
+	benchmarkMarshalFramework(b, "zl_strings", func(b *testing.B, w io.Writer) {
+		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
+		defer bw.Flush()
 
+		logger := zerolog.New(bw)
 		for b.Loop() {
 			logger.Info().
 				Str("str", "hello world").
 				Str("str_esc", "\t\r\n /?_\\\"\000\001\002\003").
-				Uint("type", 0). // Equivalent of the event's type which is always included by End
+				Uint("@type", 0).Uint64("@id", 0).Uint64("@pid", 0). // Equivalent of the fields that are auto added by the event End
+				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Msg("message")
 		}
 	})
-	b.Run("local_real_log", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "local_strings.log")
-		if err != nil {
-			b.Error(err)
-		}
-		defer f.Close()
 
+	benchmarkMarshalFramework(b, "real_log", func(b *testing.B, w io.Writer) {
 		engine := NewEngine[jsonEncoder]()
-		go engine.ProcessEvents(f)
+		go engine.ProcessEvents(w)
 		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
-
 		for b.Loop() {
 			ctx := root.Event(NoLevel, GenericEvent)
 			ctx.With().
@@ -334,17 +330,12 @@ func BenchmarkMarshalling(b *testing.B) {
 				End()
 		}
 	})
-	b.Run("zerolog_real_log", func(b *testing.B) {
-		f, err := os.CreateTemp(dir, "local_strings.log")
-		if err != nil {
-			b.Error(err)
-		}
-		w := bufio.NewWriterSize(f, 2*os.Getpagesize())
-		defer w.Flush()
-		defer f.Close()
 
-		logger := zerolog.New(bwWrap{w})
+	benchmarkMarshalFramework(b, "zl_real_log", func(b *testing.B, w io.Writer) {
+		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
+		defer bw.Flush()
 
+		logger := zerolog.New(bw)
 		for b.Loop() {
 			logger.Info().
 				Str("go.version", "go1.23.7").
@@ -363,7 +354,8 @@ func BenchmarkMarshalling(b *testing.B) {
 				Str("vars.digest", "sha256:198d5096c399a7cab47a38d8178534daf9f131d53aae4d07f6c6685e289df732").
 				Str("vars.name", "image-namespace/image-path/image-name").
 				Str("version", "3.0.0").
-				Uint("type", 0). // Equivalent of the event's type which is always included by End
+				Uint("@type", 0).Uint64("@id", 0).Uint64("@pid", 0). // Equivalent of the fields that are auto added by the event End
+				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Msg("response completed")
 		}
 	})
