@@ -41,14 +41,21 @@ func (c *Ctx[T]) Event(lvl Level, typ EvtType) Ctx[T] {
 	id, buf := c.engine.initEvent(len(c.buf))
 
 	// There is a need to
-	return Ctx[T]{
+	next := Ctx[T]{
 		eventID:     id,
 		eventParent: c.eventID,
 		lvl:         lvl,
 		typ:         typ,
-		buf:         append(buf, c.buf...),
 		engine:      c.engine,
 	}
+
+	if len(c.buf) > 0 {
+		next.buf = append(buf, c.buf...)
+	} else {
+		next.buf = append(buf, '{')
+	}
+
+	return next
 }
 
 // End implements Event.
@@ -59,6 +66,7 @@ func (c *Ctx[T]) End() {
 	c.buf = enc.appendID(c.buf, "@pid", c.eventParent)
 	c.buf = enc.appendUint(c.buf, "@type", uint(c.typ))
 	c.buf = enc.appendStr(c.buf, "level", LevelString(c.lvl))
+	c.buf = enc.appendEnd(c.buf)
 
 	c.engine.QueueEvent(c.buf)
 	c.buf = nil

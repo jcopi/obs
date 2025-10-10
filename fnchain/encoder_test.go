@@ -212,7 +212,7 @@ func BenchmarkEncodeID(b *testing.B) {
 	})
 }
 
-func benchmarkMarshalFramework(b *testing.B, name string, fn func(b *testing.B, w io.Writer)) {
+func benchmarkMarshalToFile(b *testing.B, name string, fn func(b *testing.B, w io.Writer)) {
 	tmp := b.TempDir()
 
 	b.Run(name, func(b *testing.B) {
@@ -222,29 +222,35 @@ func benchmarkMarshalFramework(b *testing.B, name string, fn func(b *testing.B, 
 		}
 		defer f.Close()
 
+		b.ResetTimer()
 		fn(b, f)
+		b.StopTimer()
 
-		info, err := f.Stat()
-		if err != nil {
-			b.Error(err)
-		}
+		// info, err := f.Stat()
+		// if err != nil {
+		// 	b.Error(err)
+		// }
 
-		b.ReportMetric(float64(info.Size())/float64(b.N), "wB/op")
-		b.ReportMetric((float64(b.Elapsed().Nanoseconds())/float64(b.N))/(float64(info.Size())/float64(b.N)), "ns/wB")
+		//b.ReportMetric(float64(info.Size())/float64(b.N), "wB/op")
 	})
 }
 
-func BenchmarkMarshalling(b *testing.B) {
+func benchmarkMarshalToDiscard(b *testing.B, name string, fn func(b *testing.B, w io.Writer)) {
+	b.Run(name, func(b *testing.B) {
+		fn(b, io.Discard)
+	})
+}
+
+func BenchmarkMarshal(b *testing.B) {
 	err := errors.New("error")
 	tm := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	benchmarkMarshalFramework(b, "all_types", func(b *testing.B, w io.Writer) {
+	allTypes := func(b *testing.B, w io.Writer) {
 		engine := NewEngine[jsonEncoder]()
 		go engine.ProcessEvents(w)
 		defer engine.Close()
 
 		root := engine.RootEvent(NoLevel, GenericEvent)
-
 		for b.Loop() {
 			ctx := root.Event(NoLevel, GenericEvent)
 			ctx.With().Bool("bool", true).Dur("dur", time.Minute).
@@ -252,9 +258,9 @@ func BenchmarkMarshalling(b *testing.B) {
 				Str("str", "hello world").Time("time", tm).
 				Msg("message").Err(err).Evt().End()
 		}
-	})
+	}
 
-	benchmarkMarshalFramework(b, "zl_all_types", func(b *testing.B, w io.Writer) {
+	zlAllTypes := func(b *testing.B, w io.Writer) {
 		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
 		defer bw.Flush()
 
@@ -266,9 +272,9 @@ func BenchmarkMarshalling(b *testing.B) {
 				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Str("str", "hello world").Time("time", tm).Err(err).Msg("message")
 		}
-	})
+	}
 
-	benchmarkMarshalFramework(b, "strings", func(b *testing.B, w io.Writer) {
+	stringsB := func(b *testing.B, w io.Writer) {
 		engine := NewEngine[jsonEncoder]()
 		go engine.ProcessEvents(w)
 		defer engine.Close()
@@ -283,9 +289,9 @@ func BenchmarkMarshalling(b *testing.B) {
 				Evt().
 				End()
 		}
-	})
+	}
 
-	benchmarkMarshalFramework(b, "zl_strings", func(b *testing.B, w io.Writer) {
+	zlStringsB := func(b *testing.B, w io.Writer) {
 		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
 		defer bw.Flush()
 
@@ -298,9 +304,9 @@ func BenchmarkMarshalling(b *testing.B) {
 				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Msg("message")
 		}
-	})
+	}
 
-	benchmarkMarshalFramework(b, "real_log", func(b *testing.B, w io.Writer) {
+	realLog := func(b *testing.B, w io.Writer) {
 		engine := NewEngine[jsonEncoder]()
 		go engine.ProcessEvents(w)
 		defer engine.Close()
@@ -329,9 +335,9 @@ func BenchmarkMarshalling(b *testing.B) {
 				Evt().
 				End()
 		}
-	})
+	}
 
-	benchmarkMarshalFramework(b, "zl_real_log", func(b *testing.B, w io.Writer) {
+	zlRealLog := func(b *testing.B, w io.Writer) {
 		bw := bwWrap{bufio.NewWriterSize(w, 2*os.Getpagesize())}
 		defer bw.Flush()
 
@@ -358,5 +364,18 @@ func BenchmarkMarshalling(b *testing.B) {
 				// Using uint64 encoding of 0 should be more favorable to zerolog here
 				Msg("response completed")
 		}
-	})
+	}
+
+	benchmarkMarshalToFile(b, "file_all_types", allTypes)
+	benchmarkMarshalToFile(b, "file_zl_all_types", zlAllTypes)
+	benchmarkMarshalToFile(b, "file_strings", stringsB)
+	benchmarkMarshalToFile(b, "file_zl_strings", zlStringsB)
+	benchmarkMarshalToFile(b, "file_real_log", realLog)
+	benchmarkMarshalToFile(b, "file_zl_real_log", zlRealLog)
+	benchmarkMarshalToDiscard(b, "discard_all_types", allTypes)
+	benchmarkMarshalToDiscard(b, "discard_zl_all_types", zlAllTypes)
+	benchmarkMarshalToDiscard(b, "discard_strings", stringsB)
+	benchmarkMarshalToDiscard(b, "discard_zl_strings", zlStringsB)
+	benchmarkMarshalToDiscard(b, "discard_real_log", realLog)
+	benchmarkMarshalToDiscard(b, "discard_zl_real_log", zlRealLog)
 }
