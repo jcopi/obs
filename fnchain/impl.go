@@ -229,6 +229,8 @@ func (e *Engine[T]) initEvent(knownBufferSize int) (uint64, []byte) {
 // we don't introduce large latencies to a small number of events. Once potential impact of direct buffered writes
 // is that most End()s are just fast copies, but a small number of End()s turn into potentially expensive large write syscalls
 // we need a way to test the average and the p99 cases.
+//
+// Benchmarks show that this method produces a large amount of lock contention overhead
 func (e *Engine[T]) QueueEvent(evt []byte) {
 	e.queue <- evt
 }
