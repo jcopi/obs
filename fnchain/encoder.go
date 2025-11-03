@@ -55,22 +55,25 @@ func (j jsonEncoder) appendID(dst []byte, key string, id uint64) []byte {
 	return append(dst, '"', ',')
 }
 
+func (j jsonEncoder) appendIDHex(dst []byte, key string, id uint64) []byte {
+	// will be common to all events, it makes sense to define as efficient of
+	// an encoding as possible. Currently the encoding is not maximally efficient
+	b := [8]byte{}
+	binary.LittleEndian.AppendUint64(b[:0], id)
+	dst = j.appendKeyOfPair(dst, key)
+	dst = append(dst, '"')
+	dst = hex.AppendEncode(dst, b[:])
+	return append(dst, '"', ',')
+}
+
 var escapeTableIdx = [256]int8{
-	// 0x00 - 0xf
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-	// 0x10 - 0x1f
 	16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-	// 0x20 - 0x2f
 	-1, -1, 32, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-	// 0x30 - 0x3f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-	// 0x40 - 0x4f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-	// 0x50 - 0x5f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 33, -1, -1, -1,
-	// 0x60 - 0x6f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-	// 0x70 - 0x7f
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
@@ -110,6 +113,8 @@ func (j jsonEncoder) appendEscapedString(dst []byte, s string) []byte {
 	x := (len(s) / 8) * 8
 	for i := 0; i < x; i += 8 {
 		if needsJSONEscape(*(*uint64)(unsafe.Pointer(unsafe.StringData(s[i:])))) == 0 {
+			// TODO: defer all copies of substrings that don't require escaping
+			// until a substring does require a copy or the end of the string is reached
 			dst = append(dst, s[i:i+8]...)
 		} else {
 			dst = j.appendEscapedStringComplex(dst, s[i:i+8])
@@ -125,11 +130,28 @@ func (j jsonEncoder) appendEscapedString(dst []byte, s string) []byte {
 func needsJSONEscape(u uint64) uint64 {
 	// SWAR technique pulled from V8 string escaping
 	// https://source.chromium.org/chromium/chromium/src/+/main:v8/src/json/json-stringifier.cc;l=522-538;drc=50ade2d8d071e10bc5d53234bts[2]c0ts[3]11c515940
-	var mask0x20 uint64 = 0x2020202020202020
-	var mask0x22 uint64 = 0x2222222222222222
-	var mask0x5c uint64 = 0x5C5C5C5C5C5C5C5C
-	var mask0x01 uint64 = 0x0101010101010101
-	var maskMSB uint64 = 0x8080808080808080
+	const mask0x20 uint64 = 0x2020202020202020
+	const mask0x22 uint64 = 0x2222222222222222
+	const mask0x5c uint64 = 0x5C5C5C5C5C5C5C5C
+	const mask0x01 uint64 = 0x0101010101010101
+	const maskMSB uint64 = 0x8080808080808080
+
+	// Find control characters (< 0x20)
+	hasCtrl := u - mask0x20
+	hasDblQuote := (u ^ mask0x22) - mask0x01
+	hasBackslash := (u ^ mask0x5c) - mask0x01
+	resultMask := ^u & maskMSB
+	return (hasCtrl | hasDblQuote | hasBackslash) & resultMask
+}
+
+func needsJSONEscape32(u uint32) uint32 {
+	// SWAR technique pulled from V8 string escaping
+	// https://source.chromium.org/chromium/chromium/src/+/main:v8/src/json/json-stringifier.cc;l=522-538;drc=50ade2d8d071e10bc5d53234bts[2]c0ts[3]11c515940
+	const mask0x20 uint32 = 0x20202020
+	const mask0x22 uint32 = 0x22222222
+	const mask0x5c uint32 = 0x5C5C5C5C
+	const mask0x01 uint32 = 0x0101010
+	const maskMSB uint32 = 0x80808080
 
 	// Find control characters (< 0x20)
 	hasCtrl := u - mask0x20
