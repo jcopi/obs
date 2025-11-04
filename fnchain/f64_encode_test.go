@@ -1,6 +1,7 @@
 package fnchain
 
 import (
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"testing"
@@ -41,7 +42,7 @@ func benchmarkDragonbox(b *testing.B, f float64) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		buf = ftoa(buf[0:], f)
+		buf = ftoa(buf[:0], f)
 	}
 }
 
@@ -50,7 +51,7 @@ func benchmarkStdlib(b *testing.B, f float64) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		buf = strconv.AppendFloat(buf, f, 'g', -1, 64)
+		buf = strconv.AppendFloat(buf[:0], f, 'g', -1, 64)
 	}
 }
 
@@ -63,7 +64,7 @@ func BenchmarkF64Encode(b *testing.B) {
 	}
 
 	for range 10 {
-		f := rand.Float64()
+		f := math.Float64frombits(rand.Uint64())
 		cases[strconv.FormatFloat(f, 'g', -1, 64)] = f
 	}
 

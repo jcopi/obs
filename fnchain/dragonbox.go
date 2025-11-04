@@ -281,7 +281,18 @@ func dragonboxDigits64(d *decimalSlice, mant uint64, exp int) {
 		first := uint32(mant / 100_000_000)        // First 9 digits
 		second := uint32(mant) - first*100_000_000 // Last 8 digits
 		print9Digits(d, first)
-		print8Digits(d, second)
+		buf, ofs := d.d, d.nd
+		prod := uint64(second) * 281474978
+		prod >>= 16
+		prod++
+		print2Digits(buf, ofs+0, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+0+2, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+2+2, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+4+2, int(prod>>32))
+		d.nd += 8
 	}
 	// Adjust decimal point.
 	d.dp = d.nd + exp
@@ -392,25 +403,6 @@ func print9Digits(d *decimalSlice, block uint32) {
 	}
 }
 
-// print9Digits emits at most 8 decimal digits of block in d.
-func print8Digits(d *decimalSlice, block uint32) {
-	// block has 8 digits.
-	buf, ofs := d.d, d.nd
-	// 281474978 = ⌈2^48 / 1,000,000⌉ + 1
-	prod := uint64(block) * 281474978
-	prod >>= 16
-	prod++
-	// Offset the index by d.nd since this may be called after print9Digits.
-	print2Digits(buf, ofs+0, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+0+2, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+2+2, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+4+2, int(prod>>32))
-	d.nd += 8
-}
-
 // print2Digits emits 2 decimal digits of n in buf starting at i.
 // n should be in the range [0, 99].
 func print2Digits(buf []byte, i int, n int) {
@@ -425,62 +417,24 @@ type uint128 struct {
 
 // uadd128 returns the full 128 bits of u + n.
 func uadd128(u uint128, n uint64) uint128 {
-	sum := uint64(u.lo + n)
-	// Check if lo is wrapped around.
-	if sum < u.lo {
-		u.hi++
-	}
-	u.lo = sum
+	var carry uint64
+	u.lo, carry = bits.Add64(u.lo, n, 0)
+	u.hi, _ = bits.Add64(u.hi, 0, carry)
+
 	return u
-}
-
-// umul64 returns the full 64 bits of x * y.
-func umul64(x, y uint32) uint64 {
-	return uint64(x) * uint64(y)
-}
-
-// umul96Upper64 returns the upper 64 bits (out of 96 bits) of x * y.
-func umul96Upper64(x uint32, y uint64) uint64 {
-	yh := uint32(y >> 32)
-	yl := uint32(y)
-	xyh := umul64(x, yh)
-	xyl := umul64(x, yl)
-	return xyh + (xyl >> 32)
-}
-
-// umul96Lower64 returns the lower 64 bits (out of 96 bits) of x * y.
-func umul96Lower64(x uint32, y uint64) uint64 {
-	return uint64(uint64(x) * y)
 }
 
 // umul128 returns the full 128 bits of x * y.
 func umul128(x, y uint64) uint128 {
-	a := uint32(x >> 32)
-	b := uint32(x)
-	c := uint32(y >> 32)
-	d := uint32(y)
-	ac := umul64(a, c)
-	bc := umul64(b, c)
-	ad := umul64(a, d)
-	bd := umul64(b, d)
-	intermediate := uint64(bd>>32) + uint64(uint32(ad)) + uint64(uint32(bc))
-	hi := ac + (intermediate >> 32) + (ad >> 32) + (bc >> 32)
-	lo := (intermediate << 32) + uint64(uint32(bd))
-	return uint128{hi, lo}
+	out := uint128{}
+	out.hi, out.lo = bits.Mul64(x, y)
+	return out
 }
 
 // umul128Upper64 returns the upper 64 bits (out of 128 bits) of x * y.
 func umul128Upper64(x, y uint64) uint64 {
-	a := uint32(x >> 32)
-	b := uint32(x)
-	c := uint32(y >> 32)
-	d := uint32(y)
-	ac := umul64(a, c)
-	bc := umul64(b, c)
-	ad := umul64(a, d)
-	bd := umul64(b, d)
-	intermediate := (bd >> 32) + uint64(uint32(ad)) + uint64(uint32(bc))
-	return ac + (intermediate >> 32) + (ad >> 32) + (bc >> 32)
+	hi, _ := bits.Mul64(x, y)
+	return hi
 }
 
 // umul192Upper128 returns the upper 128 bits (out of 192 bits) of x * y.
@@ -545,9 +499,7 @@ func floorLog10Pow2MinusLog10_4Over3(e int) int {
 
 const (
 	cacheBits64 = 128 // Q = 2*q = 128 for float64.
-	cacheBits32 = 64  // Q = 2*q = 64 for float32.
 	mantBits64  = 52  // p = 52 for float64.
-	mantBits32  = 23  // p = 23 for flaot32.
 )
 
 // computeLeftEndpoint64 computes integer part of the left endpoint x.
