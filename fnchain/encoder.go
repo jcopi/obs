@@ -91,22 +91,22 @@ func needsJSONEscape(u uint64) uint64 {
 	return (hasCtrl | hasDblQuote | hasBackslash) & resultMask
 }
 
-func needsJSONEscape32(u uint32) uint32 {
-	// SWAR technique pulled from V8 string escaping
-	// https://source.chromium.org/chromium/chromium/src/+/main:v8/src/json/json-stringifier.cc;l=522-538;drc=50ade2d8d071e10bc5d53234bts[2]c0ts[3]11c515940
-	const mask0x20 uint32 = 0x20202020
-	const mask0x22 uint32 = 0x22222222
-	const mask0x5c uint32 = 0x5C5C5C5C
-	const mask0x01 uint32 = 0x0101010
-	const maskMSB uint32 = 0x80808080
+// func needsJSONEscape32(u uint32) uint32 {
+// 	// SWAR technique pulled from V8 string escaping
+// 	// https://source.chromium.org/chromium/chromium/src/+/main:v8/src/json/json-stringifier.cc;l=522-538;drc=50ade2d8d071e10bc5d53234bts[2]c0ts[3]11c515940
+// 	const mask0x20 uint32 = 0x20202020
+// 	const mask0x22 uint32 = 0x22222222
+// 	const mask0x5c uint32 = 0x5C5C5C5C
+// 	const mask0x01 uint32 = 0x0101010
+// 	const maskMSB uint32 = 0x80808080
 
-	// Find control characters (< 0x20)
-	hasCtrl := u - mask0x20
-	hasDblQuote := (u ^ mask0x22) - mask0x01
-	hasBackslash := (u ^ mask0x5c) - mask0x01
-	resultMask := ^u & maskMSB
-	return (hasCtrl | hasDblQuote | hasBackslash) & resultMask
-}
+// 	// Find control characters (< 0x20)
+// 	hasCtrl := u - mask0x20
+// 	hasDblQuote := (u ^ mask0x22) - mask0x01
+// 	hasBackslash := (u ^ mask0x5c) - mask0x01
+// 	resultMask := ^u & maskMSB
+// 	return (hasCtrl | hasDblQuote | hasBackslash) & resultMask
+// }
 
 func (j jsonEncoder) appendKeyOfPair(dst []byte, key string) []byte {
 	dst = j.appendEscapedString(dst, key)
@@ -260,6 +260,6 @@ func (j jsonEncoder) appendKnownKeyLevel(dst []byte, knownKey string, lvl Level)
 	// an encoding as possible. Currently the encoding is not maximally efficient
 	dst = j.appendKnownKeyOfPair(dst, knownKey)
 	dst = append(dst, '"')
-	dst = append(dst, LevelString(lvl)...)
+	dst = AppendLevel(dst, lvl)
 	return append(dst, '"', ',')
 }

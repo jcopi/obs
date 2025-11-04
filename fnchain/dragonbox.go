@@ -150,9 +150,14 @@ func dragonboxFtoa64(d *decimalSlice, mant uint64, exp int, denorm bool) {
 	//    = ⌊log10(2^e)⌋ - κ
 	minusK := floorLog10Pow2(exp) - kappa // -k
 	// Compute z^(i) from the precomputed table of φ̃k (section 5.1.5).
-	beta := exp + floorLog2Pow10(-minusK)                   // β = e + ⌊k*log2(10)⌋
-	phi := getCache64(-minusK)                              // φ̃k
-	zi, zIsInt := computeMul64(uint64(mant*2+1)<<beta, phi) // z^(i), z^(f) = 0
+	beta := exp + floorLog2Pow10(-minusK) // β = e + ⌊k*log2(10)⌋
+	phi := getCache64(-minusK)            // φ̃k
+	//zi, zIsInt := computeMul64(uint64(mant*2+1)<<beta, phi) // z^(i), z^(f) = 0
+	// computeMul64 is inlined below
+	rt := umul192Upper128(uint64(mant*2+1)<<beta, phi)
+	zi := rt.hi
+	zIsInt := rt.lo == 0
+
 	// Compute δ^(i) from the precomputed table of φ̃k (section 5.1.4)
 	deltai := computeDelta64(phi, beta) // δ^(i)
 	// Algorithm 5.2 (Skeleton of Dragonbox, part 1)
@@ -449,16 +454,6 @@ func umul192Lower128(x uint64, y uint128) uint128 {
 	high := x * y.hi
 	highLow := umul128(x, y.lo)
 	return uint128{uint64(high + highLow.hi), highLow.lo}
-}
-
-// computeMul64 computes x^(i), y^(i), z^(i)
-// from the precomputed value of φ̃k for float64
-// and also checks if x^(f), y^(f), z^(f) == 0 (section 5.2.1).
-func computeMul64(u uint64, phi uint128) (intPart uint64, isInt bool) {
-	r := umul192Upper128(u, phi)
-	intPart = r.hi
-	isInt = r.lo == 0
-	return
 }
 
 // computeMul64 computes only the parity of x^(i), y^(i), z^(i)

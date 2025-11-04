@@ -70,8 +70,8 @@ func BenchmarkWrite(b *testing.B) {
 	// engine and write lists for building a
 	// benchmarking matrix
 	engines := []struct {
-		name string
 		eng  Engine
+		name string
 	}{
 		{
 			name: "___nop",
@@ -114,8 +114,8 @@ func BenchmarkWrite(b *testing.B) {
 	}
 
 	writes := []struct {
-		name string
 		fn   func(root *Ctx)
+		name string
 	}{
 		{
 			name: "minimal",
