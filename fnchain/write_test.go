@@ -10,7 +10,7 @@ import (
 )
 
 type nopEngine struct {
-	*engine[jsonEncoder]
+	*engine
 }
 
 func (d nopEngine) QueueEvent(evt []byte) {
@@ -19,18 +19,18 @@ func (d nopEngine) QueueEvent(evt []byte) {
 
 func (d nopEngine) ProcessEvents() {}
 
-func (d nopEngine) RootEvent(lvl Level, typ EvtType) Ctx[jsonEncoder] {
+func (d nopEngine) RootEvent(lvl Level, typ EvtType) *Ctx {
 	ctx := d.engine.RootEvent(lvl, typ)
 	ctx.engine = d
 	return ctx
 }
 
-func newNop() Engine[jsonEncoder] {
-	return nopEngine{NewEngine[jsonEncoder](io.Discard).(*engine[jsonEncoder])}
+func newNop() Engine {
+	return nopEngine{NewEngine(io.Discard).(*engine)}
 }
 
 type directEngine struct {
-	*engine[jsonEncoder]
+	*engine
 }
 
 func (d directEngine) QueueEvent(evt []byte) {
@@ -40,14 +40,14 @@ func (d directEngine) QueueEvent(evt []byte) {
 
 func (d directEngine) ProcessEvents() {}
 
-func (d directEngine) RootEvent(lvl Level, typ EvtType) Ctx[jsonEncoder] {
+func (d directEngine) RootEvent(lvl Level, typ EvtType) *Ctx {
 	ctx := d.engine.RootEvent(lvl, typ)
 	ctx.engine = d
 	return ctx
 }
 
-func newDirect(w io.Writer) Engine[jsonEncoder] {
-	return directEngine{NewEngine[jsonEncoder](w).(*engine[jsonEncoder])}
+func newDirect(w io.Writer) Engine {
+	return directEngine{NewEngine(w).(*engine)}
 }
 
 func noError(t testing.TB, err error) {
@@ -71,7 +71,7 @@ func BenchmarkWrite(b *testing.B) {
 	// benchmarking matrix
 	engines := []struct {
 		name string
-		eng  Engine[jsonEncoder]
+		eng  Engine
 	}{
 		{
 			name: "___nop",
@@ -95,8 +95,8 @@ func BenchmarkWrite(b *testing.B) {
 		},
 		{
 			name: "i_null",
-			eng: func() Engine[jsonEncoder] {
-				eng := NewEngine[jsonEncoder](devnull)
+			eng: func() Engine {
+				eng := NewEngine(devnull)
 				b.Cleanup(eng.Close)
 				go eng.ProcessEvents()
 				return eng
@@ -104,8 +104,8 @@ func BenchmarkWrite(b *testing.B) {
 		},
 		{
 			name: "i_file",
-			eng: func() Engine[jsonEncoder] {
-				eng := NewEngine[jsonEncoder](f)
+			eng: func() Engine {
+				eng := NewEngine(f)
 				b.Cleanup(eng.Close)
 				go eng.ProcessEvents()
 				return eng
@@ -115,25 +115,25 @@ func BenchmarkWrite(b *testing.B) {
 
 	writes := []struct {
 		name string
-		fn   func(root Ctx[jsonEncoder])
+		fn   func(root *Ctx)
 	}{
 		{
 			name: "minimal",
-			fn: func(root Ctx[jsonEncoder]) {
+			fn: func(root *Ctx) {
 				ctx := root.Event(NoLevel, GenericEvent)
 				ctx.End()
 			},
 		},
 		{
 			name: "small__",
-			fn: func(root Ctx[jsonEncoder]) {
+			fn: func(root *Ctx) {
 				ctx := root.Event(NoLevel, GenericEvent)
 				ctx.With().Bool("flag", false).Int("count", 42).Str("test", "test_string").Evt().End()
 			},
 		},
 		{
 			name: "medium_",
-			fn: func(root Ctx[jsonEncoder]) {
+			fn: func(root *Ctx) {
 				ctx := root.Event(NoLevel, GenericEvent)
 				ctx.With().Bool("bool", true).Dur("dur", time.Minute).
 					Int("int", -42).Uint("uint", 42).Float64("float", 0.1).
@@ -143,7 +143,7 @@ func BenchmarkWrite(b *testing.B) {
 		},
 		{
 			name: "large__",
-			fn: func(root Ctx[jsonEncoder]) {
+			fn: func(root *Ctx) {
 				ctx := root.Event(NoLevel, GenericEvent)
 				ctx.With().
 					Str("go.version", "go1.23.7").

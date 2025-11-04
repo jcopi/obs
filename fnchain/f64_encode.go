@@ -47,59 +47,51 @@ func ftoa(dst []byte, f float64) []byte {
 	}
 
 	if digs.dp < -3 || digs.dp >= 7 {
-		return fmtE(dst, digs)
-	}
-
-	return fmtF(dst, digs, max(digs.nd-digs.dp, 0))
-}
-
-func fmtE(dst []byte, digs decimalSlice) []byte {
-	ch := byte('0')
-	if digs.nd != 0 {
-		ch = digs.d[0]
-	}
-	dst = append(dst, ch)
-
-	if digs.nd-1 > 0 {
-		dst = append(dst, '.')
-		i := 1
-		if i < digs.nd {
-			dst = append(dst, digs.d[i:digs.nd]...)
-			i = digs.nd
+		ch := byte('0')
+		if digs.nd != 0 {
+			ch = digs.d[0]
 		}
+		dst = append(dst, ch)
+
+		if digs.nd-1 > 0 {
+			dst = append(dst, '.')
+			i := 1
+			if i < digs.nd {
+				dst = append(dst, digs.d[i:digs.nd]...)
+				i = digs.nd
+			}
+		}
+
+		dst = append(dst, 'e')
+		expe := digs.dp - 1
+		if digs.nd == 0 {
+			expe = 0
+		}
+		if expe < 0 {
+			ch = '-'
+			expe = -expe
+		} else {
+			ch = '+'
+		}
+		dst = append(dst, ch)
+
+		switch {
+		case expe < 10:
+			dst = append(dst, '0', byte(expe)+'0')
+		case expe < 100:
+			dst = append(dst, byte(expe/10)+'0', byte(expe%10)+'0')
+		default:
+			dst = append(dst, byte(expe/100)+'0', byte(expe/10)%10+'0', byte(expe%10)+'0')
+		}
+
+		return dst
 	}
 
-	dst = append(dst, 'e')
-	expe := digs.dp - 1
-	if digs.nd == 0 {
-		expe = 0
-	}
-	if expe < 0 {
-		ch = '-'
-		expe = -expe
-	} else {
-		ch = '+'
-	}
-	dst = append(dst, ch)
-
-	switch {
-	case expe < 10:
-		dst = append(dst, '0', byte(expe)+'0')
-	case expe < 100:
-		dst = append(dst, byte(expe/10)+'0', byte(expe%10)+'0')
-	default:
-		dst = append(dst, byte(expe/100)+'0', byte(expe/10)%10+'0', byte(expe%10)+'0')
-	}
-
-	return dst
-}
-
-func fmtF(dst []byte, d decimalSlice, prec int) []byte {
 	// integer, padded with zeros as needed.
-	if d.dp > 0 {
-		m := min(d.nd, d.dp)
-		dst = append(dst, d.d[:m]...)
-		for ; m < d.dp; m++ {
+	if digs.dp > 0 {
+		m := min(digs.nd, digs.dp)
+		dst = append(dst, digs.d[:m]...)
+		for ; m < digs.dp; m++ {
 			dst = append(dst, '0')
 		}
 	} else {
@@ -107,12 +99,13 @@ func fmtF(dst []byte, d decimalSlice, prec int) []byte {
 	}
 
 	// fraction
+	prec := max(digs.nd-digs.dp, 0)
 	if prec > 0 {
 		dst = append(dst, '.')
 		for i := range prec {
 			ch := byte('0')
-			if j := d.dp + i; 0 <= j && j < d.nd {
-				ch = d.d[j]
+			if j := digs.dp + i; 0 <= j && j < digs.nd {
+				ch = digs.d[j]
 			}
 			dst = append(dst, ch)
 		}

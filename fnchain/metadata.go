@@ -15,6 +15,7 @@ type Metadata[T any] interface {
 	Time(key string, t time.Time) T
 	Dur(key string, d time.Duration) T
 	Hex(key string, b []byte) T
+	Base64(key string, b []byte) T
 
 	// Some well-known fields which have automatic keys
 	Err(e error) T

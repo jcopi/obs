@@ -2,8 +2,6 @@ package fnchain
 
 import (
 	"encoding/json"
-	"math"
-	"math/rand/v2"
 	"testing"
 	"unicode/utf8"
 )
@@ -148,84 +146,4 @@ func BenchmarkEncodeStringInternal(b *testing.B) {
 		// 	}
 		// })
 	}
-}
-
-func BenchmarkEncodeID(b *testing.B) {
-	id0 := uint64(0)
-	idRand := rand.Uint64()
-	idMax := uint64(math.MaxUint64)
-
-	b.Run("b64_0", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendID(bs[:0], "id", id0)
-		}
-	})
-	b.Run("b64_rand", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendID(bs[:0], "id", idRand)
-		}
-	})
-	b.Run("b64_max", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendID(bs[:0], "id", idMax)
-		}
-	})
-	b.Run("b16_0", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendIDHex(bs[:0], "id", id0)
-		}
-	})
-	b.Run("b16_rand", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendIDHex(bs[:0], "id", idRand)
-		}
-	})
-	b.Run("b16_max", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendIDHex(bs[:0], "id", idMax)
-		}
-	})
-
-	b.Run("b10_0", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendUint64(bs[:0], "id", id0)
-		}
-	})
-	b.Run("b10_rand", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendUint64(bs[:0], "id", idRand)
-		}
-	})
-	b.Run("b10_max", func(b *testing.B) {
-		buf := [24]byte{}
-		bs := buf[:0]
-
-		for b.Loop() {
-			bs = jsonEncoder{}.appendUint64(bs[:0], "id", idMax)
-		}
-	})
 }

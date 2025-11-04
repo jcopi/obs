@@ -22,8 +22,8 @@ const minEventBufferSize = 64 // 64 B.
 const defaultEventBufferSize = 128 // 128 B
 const eventQueueSize = 196
 
-type Engine[T encoder] interface {
-	RootEvent(lvl Level, typ EvtType) Ctx[T]
+type Engine interface {
+	RootEvent(lvl Level, typ EvtType) *Ctx
 	QueueEvent(evt []byte)
 	ProcessEvents()
 	Close()
@@ -49,15 +49,13 @@ func (bp *bufferPool) getBuffer(len int) []byte {
 }
 
 func (bp *bufferPool) putBuffer(b []byte, maxSize int) {
-	if cap(b) < minEventBufferSize || cap(b) > maxSize {
-		return
+	if cap(b) >= minEventBufferSize && cap(b) <= maxSize {
+		binary.LittleEndian.AppendUint32(b[:0], uint32(cap(b)))
+		bp.Pool.Put((*byte)(unsafe.SliceData(b)))
 	}
-
-	binary.LittleEndian.AppendUint32(b[:0], uint32(cap(b)))
-	bp.Pool.Put((*byte)(unsafe.SliceData(b)))
 }
 
-type engine[T encoder] struct {
+type engine struct {
 	w io.Writer
 	bufferPool
 	queue     chan []byte
@@ -65,9 +63,9 @@ type engine[T encoder] struct {
 	maxBuffer int
 }
 
-func (e *engine[T]) RootEvent(lvl Level, typ EvtType) Ctx[T] {
+func (e *engine) RootEvent(lvl Level, typ EvtType) *Ctx {
 	id, buf := e.initEvent(defaultEventBufferSize)
-	return Ctx[T]{
+	return &Ctx{
 		engine:      e,
 		buf:         buf,
 		eventParent: rootEventParent,
@@ -77,7 +75,7 @@ func (e *engine[T]) RootEvent(lvl Level, typ EvtType) Ctx[T] {
 	}
 }
 
-func (e *engine[T]) initEvent(knownBufferSize int) (uint64, []byte) {
+func (e *engine) initEvent(knownBufferSize int) (uint64, []byte) {
 	b := e.getBuffer(max(knownBufferSize, defaultEventBufferSize))
 	return e.idsrc.Uint64(), b[:0]
 }
@@ -96,7 +94,7 @@ func (e *engine[T]) initEvent(knownBufferSize int) (uint64, []byte) {
 // we need a way to test the average and the p99 cases.
 //
 // Benchmarks show that this method produces a large amount of lock contention overhead
-func (e *engine[T]) QueueEvent(evt []byte) {
+func (e *engine) QueueEvent(evt []byte) {
 	e.queue <- evt
 }
 
@@ -118,7 +116,7 @@ func (bw bwWrap) Write(b []byte) (int, error) {
 	return bw.Writer.Write(b)
 }
 
-func (e *engine[T]) ProcessEvents() {
+func (e *engine) ProcessEvents() {
 	// Writing in page size chunks seems to dramatically increases the write speed
 	// returns diminish fairly quickly with increasing multiples of the page size
 	// In minimal initial testing there doesn't seem to be much discernible difference after 2x
@@ -144,14 +142,14 @@ func (e *engine[T]) ProcessEvents() {
 	}
 }
 
-func (e *engine[T]) Close() {
+func (e *engine) Close() {
 	close(e.queue)
 }
 
-func NewEngine[T encoder](w io.Writer) Engine[T] {
+func NewEngine(w io.Writer) Engine {
 	chachaSeed := [32]byte{}
 	crand.Read(chachaSeed[:])
-	return &engine[T]{
+	return &engine{
 		w:          w,
 		bufferPool: bufferPool{},
 		queue:      make(chan []byte, eventQueueSize),
