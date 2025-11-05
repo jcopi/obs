@@ -150,9 +150,14 @@ func dragonboxFtoa64(d *decimalSlice, mant uint64, exp int, denorm bool) {
 	//    = ⌊log10(2^e)⌋ - κ
 	minusK := floorLog10Pow2(exp) - kappa // -k
 	// Compute z^(i) from the precomputed table of φ̃k (section 5.1.5).
-	beta := exp + floorLog2Pow10(-minusK)                   // β = e + ⌊k*log2(10)⌋
-	phi := getCache64(-minusK)                              // φ̃k
-	zi, zIsInt := computeMul64(uint64(mant*2+1)<<beta, phi) // z^(i), z^(f) = 0
+	beta := exp + floorLog2Pow10(-minusK) // β = e + ⌊k*log2(10)⌋
+	phi := getCache64(-minusK)            // φ̃k
+	//zi, zIsInt := computeMul64(uint64(mant*2+1)<<beta, phi) // z^(i), z^(f) = 0
+	// computeMul64 is inlined below
+	rt := umul192Upper128(uint64(mant*2+1)<<beta, phi)
+	zi := rt.hi
+	zIsInt := rt.lo == 0
+
 	// Compute δ^(i) from the precomputed table of φ̃k (section 5.1.4)
 	deltai := computeDelta64(phi, beta) // δ^(i)
 	// Algorithm 5.2 (Skeleton of Dragonbox, part 1)
@@ -281,7 +286,18 @@ func dragonboxDigits64(d *decimalSlice, mant uint64, exp int) {
 		first := uint32(mant / 100_000_000)        // First 9 digits
 		second := uint32(mant) - first*100_000_000 // Last 8 digits
 		print9Digits(d, first)
-		print8Digits(d, second)
+		buf, ofs := d.d, d.nd
+		prod := uint64(second) * 281474978
+		prod >>= 16
+		prod++
+		print2Digits(buf, ofs+0, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+0+2, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+2+2, int(prod>>32))
+		prod = uint64(uint32(prod)) * 100
+		print2Digits(buf, ofs+4+2, int(prod>>32))
+		d.nd += 8
 	}
 	// Adjust decimal point.
 	d.dp = d.nd + exp
@@ -392,25 +408,6 @@ func print9Digits(d *decimalSlice, block uint32) {
 	}
 }
 
-// print9Digits emits at most 8 decimal digits of block in d.
-func print8Digits(d *decimalSlice, block uint32) {
-	// block has 8 digits.
-	buf, ofs := d.d, d.nd
-	// 281474978 = ⌈2^48 / 1,000,000⌉ + 1
-	prod := uint64(block) * 281474978
-	prod >>= 16
-	prod++
-	// Offset the index by d.nd since this may be called after print9Digits.
-	print2Digits(buf, ofs+0, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+0+2, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+2+2, int(prod>>32))
-	prod = uint64(uint32(prod)) * 100
-	print2Digits(buf, ofs+4+2, int(prod>>32))
-	d.nd += 8
-}
-
 // print2Digits emits 2 decimal digits of n in buf starting at i.
 // n should be in the range [0, 99].
 func print2Digits(buf []byte, i int, n int) {
@@ -425,62 +422,24 @@ type uint128 struct {
 
 // uadd128 returns the full 128 bits of u + n.
 func uadd128(u uint128, n uint64) uint128 {
-	sum := uint64(u.lo + n)
-	// Check if lo is wrapped around.
-	if sum < u.lo {
-		u.hi++
-	}
-	u.lo = sum
+	var carry uint64
+	u.lo, carry = bits.Add64(u.lo, n, 0)
+	u.hi, _ = bits.Add64(u.hi, 0, carry)
+
 	return u
-}
-
-// umul64 returns the full 64 bits of x * y.
-func umul64(x, y uint32) uint64 {
-	return uint64(x) * uint64(y)
-}
-
-// umul96Upper64 returns the upper 64 bits (out of 96 bits) of x * y.
-func umul96Upper64(x uint32, y uint64) uint64 {
-	yh := uint32(y >> 32)
-	yl := uint32(y)
-	xyh := umul64(x, yh)
-	xyl := umul64(x, yl)
-	return xyh + (xyl >> 32)
-}
-
-// umul96Lower64 returns the lower 64 bits (out of 96 bits) of x * y.
-func umul96Lower64(x uint32, y uint64) uint64 {
-	return uint64(uint64(x) * y)
 }
 
 // umul128 returns the full 128 bits of x * y.
 func umul128(x, y uint64) uint128 {
-	a := uint32(x >> 32)
-	b := uint32(x)
-	c := uint32(y >> 32)
-	d := uint32(y)
-	ac := umul64(a, c)
-	bc := umul64(b, c)
-	ad := umul64(a, d)
-	bd := umul64(b, d)
-	intermediate := uint64(bd>>32) + uint64(uint32(ad)) + uint64(uint32(bc))
-	hi := ac + (intermediate >> 32) + (ad >> 32) + (bc >> 32)
-	lo := (intermediate << 32) + uint64(uint32(bd))
-	return uint128{hi, lo}
+	out := uint128{}
+	out.hi, out.lo = bits.Mul64(x, y)
+	return out
 }
 
 // umul128Upper64 returns the upper 64 bits (out of 128 bits) of x * y.
 func umul128Upper64(x, y uint64) uint64 {
-	a := uint32(x >> 32)
-	b := uint32(x)
-	c := uint32(y >> 32)
-	d := uint32(y)
-	ac := umul64(a, c)
-	bc := umul64(b, c)
-	ad := umul64(a, d)
-	bd := umul64(b, d)
-	intermediate := (bd >> 32) + uint64(uint32(ad)) + uint64(uint32(bc))
-	return ac + (intermediate >> 32) + (ad >> 32) + (bc >> 32)
+	hi, _ := bits.Mul64(x, y)
+	return hi
 }
 
 // umul192Upper128 returns the upper 128 bits (out of 192 bits) of x * y.
@@ -497,26 +456,6 @@ func umul192Lower128(x uint64, y uint128) uint128 {
 	return uint128{uint64(high + highLow.hi), highLow.lo}
 }
 
-// computeMul64 computes x^(i), y^(i), z^(i)
-// from the precomputed value of φ̃k for float64
-// and also checks if x^(f), y^(f), z^(f) == 0 (section 5.2.1).
-func computeMul64(u uint64, phi uint128) (intPart uint64, isInt bool) {
-	r := umul192Upper128(u, phi)
-	intPart = r.hi
-	isInt = r.lo == 0
-	return
-}
-
-// computeMul64 computes x^(i), y^(i), z^(i)
-// from the precomputed value of φ̃k for float32
-// and also checks if x^(f), y^(f), z^(f) == 0 (section 5.2.1).
-func computeMul32(u uint32, phi uint64) (intPart uint32, isInt bool) {
-	r := umul96Upper64(u, phi)
-	intPart = uint32(r >> 32)
-	isInt = uint32(r) == 0
-	return
-}
-
 // computeMul64 computes only the parity of x^(i), y^(i), z^(i)
 // from the precomputed value of φ̃k for float64
 // and also checks if x^(f), y^(f), z^(f) = 0 (section 5.2.1).
@@ -527,24 +466,9 @@ func computeMulParity64(mant2 uint64, phi uint128, beta int) (parity bool, isInt
 	return
 }
 
-// computeMul64 computes only the parity of x^(i), y^(i), z^(i)
-// from the precomputed value of φ̃k for float32
-// and also checks if x^(f), y^(f), z^(f) = 0 (section 5.2.1).
-func computeMulParity32(mant2 uint32, phi uint64, beta int) (parity bool, isInt bool) {
-	r := umul96Lower64(mant2, phi)
-	parity = ((r >> (64 - beta)) & 1) != 0
-	isInt = uint32(r>>(32-beta)) == 0
-	return
-}
-
 // computeDelta64 computes δ^(i) from the precomputed value of φ̃k for float64.
 func computeDelta64(phi uint128, beta int) uint32 {
 	return uint32(phi.hi >> (cacheBits64/2 - 1 - beta))
-}
-
-// computeDelta64 computes δ^(i) from the precomputed value of φ̃k for float32.
-func computeDelta32(phi uint64, beta int) uint32 {
-	return uint32(phi >> (cacheBits32 - 1 - beta))
 }
 
 // floorLog10Pow2 computes ⌊log10(2^e)⌋ = ⌊e*log10(2)⌋ (section 6.1).
@@ -570,9 +494,7 @@ func floorLog10Pow2MinusLog10_4Over3(e int) int {
 
 const (
 	cacheBits64 = 128 // Q = 2*q = 128 for float64.
-	cacheBits32 = 64  // Q = 2*q = 64 for float32.
 	mantBits64  = 52  // p = 52 for float64.
-	mantBits32  = 23  // p = 23 for flaot32.
 )
 
 // computeLeftEndpoint64 computes integer part of the left endpoint x.
@@ -581,32 +503,15 @@ func computeLeftEndpoint64(phi uint128, beta int) uint64 {
 		(cacheBits64/2 - mantBits64 - 1 - beta)
 }
 
-// computeLeftEndpoint32 computes integer part of the left endpoint x.
-func computeLeftEndpoint32(phi uint64, beta int) uint32 {
-	return uint32((phi - (phi >> (mantBits32 + 2))) >>
-		(cacheBits32 - mantBits32 - 1 - beta))
-}
-
 // computeRightEndpoint64 computes integer part of the right endpoint z.
 func computeRightEndpoint64(phi uint128, beta int) uint64 {
 	return (phi.hi + (phi.hi >> (mantBits64 + 1))) >>
 		(cacheBits64/2 - mantBits64 - 1 - beta)
 }
 
-// computeRightEndpoint32 computes integer part of the right endpoint z.
-func computeRightEndpoint32(phi uint64, beta int) uint32 {
-	return uint32((phi + (phi >> (mantBits32 + 1))) >>
-		(cacheBits32 - mantBits32 - 1 - beta))
-}
-
 // computeRoundUp64 computes the round up of y (i.e., y^(ru)).
 func computeRoundUp64(phi uint128, beta int) uint64 {
 	return (phi.hi>>(cacheBits64/2-mantBits64-2-beta) + 1) / 2
-}
-
-// computeRoundUp32 computes the round up of y (i.e., y^(ru)).
-func computeRoundUp32(phi uint64, beta int) uint32 {
-	return uint32(phi>>(cacheBits32-mantBits32-2-beta)+1) / 2
 }
 
 // removeTrailingZeros64 removes trailing zeros in decimal digits.
@@ -644,47 +549,13 @@ func removeTrailingZeros64(mant uint64, exp int) (uint64, int) {
 	return mant, exp
 }
 
-// removeTrailingZeros32 removes trailing zeros in decimal digits.
-// There are at most 7 trailing zeros for float32 (page 16).
-func removeTrailingZeros32(mant uint32, exp int) (uint32, int) {
-	r := bits.RotateLeft32(mant*184254097, -4)
-	b := r < 429497
-	s := 0
-	if b { // TODO: Make this branchless if necessary.
-		s++
-		mant = r
-	}
-	r = bits.RotateLeft32(mant*42949673, -2)
-	b = r < 42949673
-	s = s * 2
-	if b {
-		s++
-		mant = r
-	}
-	r = bits.RotateLeft32(mant*1288490189, -1)
-	b = r < 429496730
-	s = s * 2
-	if b {
-		s++
-		mant = r
-	}
-	exp += s
-	return mant, exp
-}
-
 const (
 	cacheMinK64 = -292 // k ∈ [-292, 326] for float64 (section 6.2).
-	cacheMinK32 = -31  // k ∈ [-31, 46] for float32 (section 6.2).
 )
 
 // getCache64 gets the precomputed value of φ̃̃k for float64.
 func getCache64(k int) uint128 {
 	return cache64[k-cacheMinK64]
-}
-
-// getCache32 gets the precomputed value of φ̃̃k for float32.
-func getCache32(k int) uint64 {
-	return cache32[k-cacheMinK32]
 }
 
 const smallsString = "00010203040506070809" +
@@ -1326,47 +1197,4 @@ var cache64 = [619]uint128{
 	{0x9e19db92b4e31ba9, 0x6c07a2c26a8346d2},
 	{0xc5a05277621be293, 0xc7098b7305241886},
 	{0xf70867153aa2db38, 0xb8cbee4fc66d1ea8},
-}
-
-// The precomputed table of φ̃̃k for float32.
-var cache32 = [78]uint64{
-	0x81ceb32c4b43fcf5, 0xa2425ff75e14fc32,
-	0xcad2f7f5359a3b3f, 0xfd87b5f28300ca0e,
-	0x9e74d1b791e07e49, 0xc612062576589ddb,
-	0xf79687aed3eec552, 0x9abe14cd44753b53,
-	0xc16d9a0095928a28, 0xf1c90080baf72cb2,
-	0x971da05074da7bef, 0xbce5086492111aeb,
-	0xec1e4a7db69561a6, 0x9392ee8e921d5d08,
-	0xb877aa3236a4b44a, 0xe69594bec44de15c,
-	0x901d7cf73ab0acda, 0xb424dc35095cd810,
-	0xe12e13424bb40e14, 0x8cbccc096f5088cc,
-	0xafebff0bcb24aaff, 0xdbe6fecebdedd5bf,
-	0x89705f4136b4a598, 0xabcc77118461cefd,
-	0xd6bf94d5e57a42bd, 0x8637bd05af6c69b6,
-	0xa7c5ac471b478424, 0xd1b71758e219652c,
-	0x83126e978d4fdf3c, 0xa3d70a3d70a3d70b,
-	0xcccccccccccccccd, 0x8000000000000000,
-	0xa000000000000000, 0xc800000000000000,
-	0xfa00000000000000, 0x9c40000000000000,
-	0xc350000000000000, 0xf424000000000000,
-	0x9896800000000000, 0xbebc200000000000,
-	0xee6b280000000000, 0x9502f90000000000,
-	0xba43b74000000000, 0xe8d4a51000000000,
-	0x9184e72a00000000, 0xb5e620f480000000,
-	0xe35fa931a0000000, 0x8e1bc9bf04000000,
-	0xb1a2bc2ec5000000, 0xde0b6b3a76400000,
-	0x8ac7230489e80000, 0xad78ebc5ac620000,
-	0xd8d726b7177a8000, 0x878678326eac9000,
-	0xa968163f0a57b400, 0xd3c21bcecceda100,
-	0x84595161401484a0, 0xa56fa5b99019a5c8,
-	0xcecb8f27f4200f3a, 0x813f3978f8940985,
-	0xa18f07d736b90be6, 0xc9f2c9cd04674edf,
-	0xfc6f7c4045812297, 0x9dc5ada82b70b59e,
-	0xc5371912364ce306, 0xf684df56c3e01bc7,
-	0x9a130b963a6c115d, 0xc097ce7bc90715b4,
-	0xf0bdc21abb48db21, 0x96769950b50d88f5,
-	0xbc143fa4e250eb32, 0xeb194f8e1ae525fe,
-	0x92efd1b8d0cf37bf, 0xb7abc627050305ae,
-	0xe596b7b0c643c71a, 0x8f7e32ce7bea5c70,
-	0xb35dbf821ae4f38c, 0xe0352f62a19e306f,
 }

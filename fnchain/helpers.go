@@ -2,6 +2,8 @@ package fnchain
 
 import (
 	"context"
+	"io"
+	"os"
 	"sync"
 )
 
@@ -10,44 +12,46 @@ var (
 	contextKey = "obs_context_key"
 )
 
-func NewSingletonEngineFromEncoder[T encoder](enc T) *Engine[T] {
-	key := any(*new(T))
-	e, ok := engineMap.Load(key)
+// NewSingletonEngine uses the writer as the singleton key
+// this way there can only ever be a single engine using a particular writer instance
+func NewSingletonEngine(w io.Writer) Engine {
+	e, ok := engineMap.Load(w)
 
 	if !ok {
-		e = NewEngine[T]()
-		engineMap.Store(key, e)
+		e = NewEngine(w)
+		engineMap.Store(w, e)
 	}
 
-	return e.(*Engine[T])
+	return e.(Engine)
 }
 
-func NewDefaultSingletonEngine() *Engine[jsonEncoder] {
-	return NewSingletonEngineFromEncoder(jsonEncoder{})
+func NewDefaultSingletonEngine() Engine {
+	return NewSingletonEngine(os.Stdout)
 }
 
-// func FromContextOrRoot[T any, M EventMeta[M, *T]](ctx context.Context, lvl Level, typ EvtType) Event[T, M] {
-// 	evt := FromContextOrNil[T, M](ctx)
-// 	if evt != nil {
-// 		return evt
-// 	}
+func FromContextOrRoot(ctx context.Context, lvl Level, typ EvtType) *Ctx {
+	evt := FromContextOrNil(ctx)
+	if evt != nil {
+		return evt
+	}
 
-// 	return NewDefaultSingletonEngine().RootEvent(lvl, typ)
-// }
+	return NewDefaultSingletonEngine().RootEvent(lvl, typ)
+}
 
-func FromContextOrNil[T any, M EventMeta[M, *T]](ctx context.Context) Event[T, M] {
+func FromContextOrNil(ctx context.Context) *Ctx {
 	val := ctx.Value(contextKey)
 	if val == nil {
 		return nil
 	}
 
-	e, ok := val.(Event[T, M])
+	e, ok := val.(*Ctx)
 	if !ok {
 		return nil
 	}
+
 	return e
 }
 
-func ContextWithEvent[T any, M EventMeta[M, *T]](ctx context.Context, e Event[T, M]) context.Context {
+func ContextWithEvent(ctx context.Context, e *Ctx) context.Context {
 	return context.WithValue(ctx, contextKey, e)
 }

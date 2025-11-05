@@ -1,6 +1,8 @@
 package fnchain
 
 import (
+	"math"
+	"math/rand/v2"
 	"strconv"
 	"testing"
 )
@@ -33,4 +35,45 @@ func FuzzF64Encode(f *testing.F) {
 			}
 		}
 	})
+}
+
+func benchmarkDragonbox(b *testing.B, f float64) {
+	buf := make([]byte, 0, 24)
+
+	b.ResetTimer()
+	for b.Loop() {
+		buf = ftoa(buf[:0], f)
+	}
+}
+
+func benchmarkStdlib(b *testing.B, f float64) {
+	buf := make([]byte, 0, 24)
+
+	b.ResetTimer()
+	for b.Loop() {
+		buf = strconv.AppendFloat(buf[:0], f, 'g', -1, 64)
+	}
+}
+
+func BenchmarkF64Encode(b *testing.B) {
+	cases := map[string]float64{
+		"0":   float64(0),
+		"0.5": float64(0.5),
+		"1":   float64(1),
+		"2":   float64(2),
+	}
+
+	for range 10 {
+		f := math.Float64frombits(rand.Uint64())
+		cases[strconv.FormatFloat(f, 'g', -1, 64)] = f
+	}
+
+	for k, f := range cases {
+		b.Run("dbx_"+k, func(b *testing.B) {
+			benchmarkDragonbox(b, f)
+		})
+		b.Run("std_"+k, func(b *testing.B) {
+			benchmarkStdlib(b, f)
+		})
+	}
 }
