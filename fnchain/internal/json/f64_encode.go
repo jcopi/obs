@@ -1,4 +1,4 @@
-package fnchain
+package json
 
 import "math"
 

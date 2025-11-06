@@ -1,4 +1,4 @@
-package fnchain
+package json
 
 import (
 	"encoding/json"
@@ -6,29 +6,11 @@ import (
 	"unicode/utf8"
 )
 
-func TestEscape(t *testing.T) {
-	cases := []struct {
-		name  string
-		input string
-	}{
-		{name: "happy path", input: "0123456789_-+=:'/.,><abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"},
-		{name: "happy path", input: "\t\r\n /?_\\\"\000\001\002\003"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dst := make([]byte, 0, 10)
-			dst = (jsonEncoder{}).appendEscapedString(dst, tc.input)
-			var out string
-			err := json.Unmarshal(dst, &out)
-			if err != nil {
-				t.Error(err)
-			}
-
-			if out != tc.input {
-				t.Errorf("expected %q, got %q", tc.input, out)
-			}
-		})
+func TestAssertIndex(t *testing.T) {
+	for i, idx := range escapeTableIdx {
+		if int(idx) >= len(escapeTable) {
+			t.Errorf("escape table index at %v (%v) is too large", i, idx)
+		}
 	}
 }
 
@@ -39,6 +21,8 @@ func FuzzJsonEscape(f *testing.F) {
 		"", " ", "\000",
 		"✅🙃🤦👍", "\\\"\000\001\002✅🙃\t\r\n 🤦👍",
 		"a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh", "abcdefghi",
+		`\"\\"\'"\\"\'|'''|\\\"\"`, "ndjfnjknfjkndjkvnßtj13op4k5tr893ur=-132plf[350qi0]lgf[n2g\"",
+		"  \n  \t  \f  ", "        ", "         ",
 	}
 	for _, s := range corpus {
 		f.Add(s)
@@ -46,7 +30,7 @@ func FuzzJsonEscape(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, input string) {
 		dst := make([]byte, 0, 10)
-		dst = (jsonEncoder{}).appendEscapedString(dst, input)
+		dst = AppendEscapedString(dst, input)
 		var out string
 		err := json.Unmarshal(dst, &out)
 		if err != nil {
@@ -82,24 +66,17 @@ func BenchmarkEncodeString(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		b.Run("local_"+tc.name, func(b *testing.B) {
+		b.Run(tc.name, func(b *testing.B) {
 			dst := make([]byte, 0, 100)
 			for b.Loop() {
 				dst = dst[:0]
-				dst = jsonEncoder{}.appendEscapedString(dst, tc.input)
+				dst = AppendEscapedString(dst, tc.input)
 			}
 		})
-		// b.Run("local2_"+tc.name, func(b *testing.B) {
-		// 	dst := make([]byte, 0, 100)
-		// 	for b.Loop() {
-		// 		dst = dst[:0]
-		// 		dst = jsonEncoder{}.appendEscapedString2(dst, tc.input)
-		// 	}
-		// })
 	}
 }
 
-func BenchmarkEncodeStringInternal(b *testing.B) {
+func BenchmarkAppendStringRemainder(b *testing.B) {
 	cases := []struct {
 		name  string
 		input string
@@ -111,7 +88,6 @@ func BenchmarkEncodeStringInternal(b *testing.B) {
 		{name: "ne_5", input: "abcde"},
 		{name: "ne_6", input: "abcdef"},
 		{name: "ne_7", input: "abcdefg"},
-		{name: "ne_8", input: "abcdefgh"},
 		{name: "es_1", input: "\x00"},
 		{name: "es_2", input: "\x00b"},
 		{name: "es_3", input: "\x00bc"},
@@ -119,7 +95,6 @@ func BenchmarkEncodeStringInternal(b *testing.B) {
 		{name: "es_5", input: "\x00bcde"},
 		{name: "es_6", input: "\x00bcdef"},
 		{name: "es_7", input: "\x00bcdefg"},
-		{name: "es_8", input: "\x00bcdefgh"},
 		{name: "ee_1", input: "\x00"},
 		{name: "ee_2", input: "a\x00"},
 		{name: "ee_3", input: "ab\x00"},
@@ -127,23 +102,16 @@ func BenchmarkEncodeStringInternal(b *testing.B) {
 		{name: "ee_5", input: "abcd\x00"},
 		{name: "ee_6", input: "abcde\x00"},
 		{name: "ee_7", input: "abcdef\x00"},
-		{name: "ee_8", input: "abcdefg\x00"},
+		{name: "e_all", input: "\x00\x19\n\r\t\\\""},
 	}
 
 	for _, tc := range cases {
-		b.Run("local_"+tc.name, func(b *testing.B) {
+		b.Run(tc.name, func(b *testing.B) {
 			dst := make([]byte, 0, 32)
 			for b.Loop() {
 				dst = dst[:0]
-				dst = jsonEncoder{}.appendEscapedStringComplex(dst, tc.input)
+				dst = appendStringRemainder(dst, tc.input)
 			}
 		})
-		// b.Run("local2_"+tc.name, func(b *testing.B) {
-		// 	dst := make([]byte, 0, 32)
-		// 	for b.Loop() {
-		// 		dst = dst[:0]
-		// 		dst = jsonEncoder{}.appendEscapedStringComplex2(dst, tc.input)
-		// 	}
-		// })
 	}
 }
