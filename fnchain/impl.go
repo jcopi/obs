@@ -19,7 +19,8 @@ type Ctx struct {
 
 type CtxMeta Ctx
 
-var _ Event[*Ctx, *CtxMeta] = &Ctx{}
+var _ Event[*Ctx, *CtxMeta] = (*Ctx)(nil)
+var _ EventMeta[*CtxMeta, *Ctx] = (*CtxMeta)(nil)
 
 // Event implements Event.
 func (c *Ctx) Event(lvl Level, typ EvtType) *Ctx {
@@ -62,6 +63,17 @@ func (c *Ctx) With() *CtxMeta {
 // Evt implements EventMeta
 func (c *CtxMeta) Evt() *Ctx {
 	return (*Ctx)(c)
+}
+
+// Level implements EventMeta
+func (c *CtxMeta) Level(lvl Level) *CtxMeta {
+	c.lvl = lvl
+	return c
+}
+
+func (c *CtxMeta) Type(typ EvtType) *CtxMeta {
+	c.typ = typ
+	return c
 }
 
 // Base64 implements Event.

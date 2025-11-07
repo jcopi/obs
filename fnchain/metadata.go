@@ -23,6 +23,8 @@ type Metadata[T any] interface {
 	// Some well-known fields which have automatic keys
 	Err(e error) T
 	Msg(msg string) T
+	Level(lvl Level) T
+	Type(typ EvtType) T
 }
 
 type Level int8
