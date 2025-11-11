@@ -1,6 +1,9 @@
 package fnchain
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 type Metadata[T any] interface {
 	Bool(key string, b bool) T
@@ -20,6 +23,8 @@ type Metadata[T any] interface {
 	// Some well-known fields which have automatic keys
 	Err(e error) T
 	Msg(msg string) T
+	Level(lvl Level) T
+	Type(typ EvtType) T
 }
 
 type Level int8
@@ -55,10 +60,8 @@ func LevelString(lvl Level) string {
 	}
 }
 
-func AppendLevel(dst []byte, lvl Level) []byte {
-	// This should be efficient because the strings in LevelString are constants
-	// there shouldn't be any additional allocations from this approach
-	return append(dst, LevelString(lvl)...)
+func (l Level) Append(dst []byte) []byte {
+	return append(dst, LevelString(l)...)
 }
 
 type EvtType uint32
@@ -67,3 +70,7 @@ const (
 	GenericEvent EvtType = iota
 	MethodEvent
 )
+
+func (t EvtType) Append(dst []byte) []byte {
+	return strconv.AppendUint(dst, uint64(t), 16)
+}
