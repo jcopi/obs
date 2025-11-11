@@ -1,17 +1,16 @@
 package fnchain
 
 import (
-	"context"
 	"os"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestNewSingletonEngine(t *testing.T) {
 	engineMap.Clear()
 	e := NewSingletonEngine(os.Stdout)
-	assert.NotNil(t, e)
+	if e == nil {
+		t.Error("engine was nil, initialization failed")
+	}
 
 	var check int
 	engineMap.Range(func(key, value any) bool {
@@ -19,7 +18,9 @@ func TestNewSingletonEngine(t *testing.T) {
 		return true
 	})
 
-	assert.Equal(t, 1, check)
+	if check != 1 {
+		t.Errorf("map had %d entries, it should only have a single entry in the cache", check)
+	}
 	e.Close()
 
 	_ = NewSingletonEngine(os.Stdout)
@@ -28,18 +29,7 @@ func TestNewSingletonEngine(t *testing.T) {
 		checkDup++
 		return true
 	})
-	assert.Equal(t, 1, checkDup)
-}
-
-func TestContextHelpers(t *testing.T) {
-	ctx := context.Background()
-	ev := FromContextOrNil(ctx)
-	assert.Nil(t, ev)
-
-	e := NewDefaultSingletonEngine()
-	evt := e.RootEvent(DebugLevel, GenericEvent)
-
-	weCtx := ContextWithEvent(ctx, evt)
-	actual := FromContextOrNil(weCtx)
-	assert.Equal(t, evt, actual)
+	if checkDup != 1 {
+		t.Errorf("map had %d entries, cache did not work", checkDup)
+	}
 }

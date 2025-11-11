@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	engineMap  sync.Map
-	contextKey = "obs_context_key"
+	engineMap sync.Map
 )
+
+type contextKey struct{}
 
 // NewSingletonEngine uses the writer as the singleton key
 // this way there can only ever be a single engine using a particular writer instance
@@ -29,29 +30,20 @@ func NewDefaultSingletonEngine() Engine {
 	return NewSingletonEngine(os.Stdout)
 }
 
-func FromContextOrRoot(ctx context.Context, lvl Level, typ EvtType) *Ctx {
-	evt := FromContextOrNil(ctx)
-	if evt != nil {
-		return evt
-	}
-
-	return NewDefaultSingletonEngine().RootEvent(lvl, typ)
-}
-
-func FromContextOrNil(ctx context.Context) *Ctx {
-	val := ctx.Value(contextKey)
+func FromContextOrRoot(ctx context.Context) *Ctx {
+	val := ctx.Value(contextKey{})
 	if val == nil {
 		return nil
 	}
 
 	e, ok := val.(*Ctx)
 	if !ok {
-		return nil
+		return NewDefaultSingletonEngine().RootEvent(NoLevel, GenericEvent)
 	}
 
 	return e
 }
 
 func ContextWithEvent(ctx context.Context, e *Ctx) context.Context {
-	return context.WithValue(ctx, contextKey, e)
+	return context.WithValue(ctx, contextKey{}, e.Event(NoLevel, GenericEvent))
 }
